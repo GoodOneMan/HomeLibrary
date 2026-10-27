@@ -1,3 +1,4 @@
+"""CRUD, поиск и статистика по книгам."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +10,7 @@ from .models import Book
 
 class DuplicateBookError(Exception):
     """Попытка вставить дубликат (author, title, year)."""
+
 
 class BookRepository:
     """Репозиторий книг поверх SQLite."""
