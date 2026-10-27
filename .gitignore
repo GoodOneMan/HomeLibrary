@@ -58,6 +58,18 @@ bld/
 # Uncomment if you have tasks that create the project's static files in wwwroot
 #wwwroot/
 
+#Python venv
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+library.db
+reports_out/
+.pytest_cache/
+.idea/
+.vscode/
+
 # Visual Studio 2017 auto generated files
 Generated\ Files/
 
