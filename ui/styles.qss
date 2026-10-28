@@ -6,17 +6,17 @@ QLineEdit, QSpinBox, QComboBox {
     background: #ffffff;
     min-height: 24px;
 }
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: #1d4ed8; }
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: #60646e; }
 QPushButton {
-    background: #1d4ed8;
+    background: #a86128;
     color: white;
     border: none;
     border-radius: 6px;
     padding: 8px 14px;
     font-weight: 600;
 }
-QPushButton:hover { background: #2563eb; }
-QPushButton:pressed { background: #1e40af; }
+QPushButton:hover { background: #6e401a; }
+QPushButton:pressed { background: #6e401a; }
 QTableWidget {
     background: white;
     border: 1px solid #e5e7eb;
@@ -24,7 +24,7 @@ QTableWidget {
     gridline-color: #eef1f6;
 }
 QHeaderView::section {
-    background: #1d4ed8;
+    background: #60646e;
     color: white;
     padding: 8px;
     border: none;

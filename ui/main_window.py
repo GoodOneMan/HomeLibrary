@@ -1,14 +1,17 @@
+"""Главное окно PySide6."""
 from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
-    QFileDialog,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -27,6 +30,59 @@ from app.repository import BookRepository, DuplicateBookError
 from app.reports import generate_html_report, generate_txt_report
 
 REPORTS_DIR: Path = Path(__file__).resolve().parent.parent / "reports_out"
+
+
+class BookEditDialog(QDialog):
+    """Диалог редактирования книги (все поля: автор, название, год, жанр)."""
+
+    def __init__(self, book: Book, parent: QWidget | None = None) -> None:
+        """Создаёт форму редактирования, предзаполненную данными книги.
+
+        Args:
+            book: Исходная книга, поля которой будут показаны в форме.
+            parent: Родительский виджет для модальности.
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Редактирование книги")
+        self.setMinimumWidth(420)
+
+        # --- Поля формы ---
+        self.ed_author = QLineEdit(book.author)
+        self.ed_title = QLineEdit(book.title)
+        self.sp_year = QSpinBox()
+        self.sp_year.setRange(0, 2100)
+        self.sp_year.setValue(book.year)
+        self.ed_genre = QLineEdit(book.genre)
+
+        # --- Компоновка через QFormLayout: подписи слева, поля справа ---
+        form = QFormLayout()
+        form.addRow("Автор:", self.ed_author)
+        form.addRow("Название:", self.ed_title)
+        form.addRow("Год:", self.sp_year)
+        form.addRow("Жанр:", self.ed_genre)
+
+        # --- Стандартные кнопки OK/Cancel ---
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def get_values(self) -> dict[str, object]:
+        """Возвращает отредактированные значения в виде словаря.
+
+        Используется после `exec()` == `QDialog.Accepted`.
+        """
+        return {
+            "author": self.ed_author.text().strip(),
+            "title": self.ed_title.text().strip(),
+            "year": self.sp_year.value(),
+            "genre": self.ed_genre.text().strip(),
+        }
 
 
 class MainWindow(QMainWindow):
@@ -163,22 +219,37 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Ошибка", str(e))
 
     def on_edit(self) -> None:
-        """Редактирует название выбранной книги."""
+        """Редактирует выбранную книгу: автор, название, год, жанр."""
         book_id = self._selected_id()
         if book_id is None:
             return
         book = self.repo.get(book_id)
         if book is None:
             return
-        new_title, ok = QInputDialog.getText(
-            self, "Редактирование", "Название:", text=book.title
-        )
-        if ok and new_title.strip():
-            try:
-                self.repo.update(book_id, title=new_title.strip())
-                self.refresh()
-            except Exception as e:
-                QMessageBox.warning(self, "Ошибка", str(e))
+
+        # Открываем диалог со всеми полями, предзаполненными значениями книги.
+        dialog = BookEditDialog(book, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        values = dialog.get_values()
+        try:
+            # Пересоздаём Book для валидации новых полей до записи в БД.
+            Book(
+                author=str(values["author"]),
+                title=str(values["title"]),
+                year=int(values["year"]),  # type: ignore[arg-type]
+                genre=str(values["genre"]),
+            )
+            # Обновляем все поля одним запросом.
+            self.repo.update(book_id, **values)
+            self.refresh()
+        except ValidationError as e:
+            QMessageBox.warning(self, "Ошибка валидации", str(e))
+        except DuplicateBookError as e:
+            QMessageBox.warning(self, "Дубликат", str(e))
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
 
     def on_delete(self) -> None:
         """Удаляет выбранную книгу после подтверждения."""
