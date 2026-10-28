@@ -32,21 +32,30 @@ from app.reports import generate_html_report, generate_txt_report
 REPORTS_DIR: Path = Path(__file__).resolve().parent.parent / "reports_out"
 
 
+class NumericTableItem(QTableWidgetItem):
+    """Ячейка таблицы, сортирующаяся по числу, а не по строке.
+
+    Используется для колонки «Год», чтобы, например, 999 сортировалось
+    раньше 1868, а не наоборот (по умолчанию QTableWidgetItem сравнивает текст).
+    """
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        """Сравнивает значения как числа, если оба приводимы к int."""
+        try:
+            return int(self.text()) < int(other.text())
+        except (ValueError, TypeError):
+            return super().__lt__(other)
+
+
 class BookEditDialog(QDialog):
     """Диалог редактирования книги (все поля: автор, название, год, жанр)."""
 
     def __init__(self, book: Book, parent: QWidget | None = None) -> None:
-        """Создаёт форму редактирования, предзаполненную данными книги.
-
-        Args:
-            book: Исходная книга, поля которой будут показаны в форме.
-            parent: Родительский виджет для модальности.
-        """
+        """Создаёт форму редактирования, предзаполненную данными книги."""
         super().__init__(parent)
         self.setWindowTitle("Редактирование книги")
         self.setMinimumWidth(420)
 
-        # --- Поля формы ---
         self.ed_author = QLineEdit(book.author)
         self.ed_title = QLineEdit(book.title)
         self.sp_year = QSpinBox()
@@ -54,14 +63,12 @@ class BookEditDialog(QDialog):
         self.sp_year.setValue(book.year)
         self.ed_genre = QLineEdit(book.genre)
 
-        # --- Компоновка через QFormLayout: подписи слева, поля справа ---
         form = QFormLayout()
         form.addRow("Автор:", self.ed_author)
         form.addRow("Название:", self.ed_title)
         form.addRow("Год:", self.sp_year)
         form.addRow("Жанр:", self.ed_genre)
 
-        # --- Стандартные кнопки OK/Cancel ---
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self
         )
@@ -73,10 +80,7 @@ class BookEditDialog(QDialog):
         layout.addWidget(buttons)
 
     def get_values(self) -> dict[str, object]:
-        """Возвращает отредактированные значения в виде словаря.
-
-        Используется после `exec()` == `QDialog.Accepted`.
-        """
+        """Возвращает отредактированные значения в виде словаря."""
         return {
             "author": self.ed_author.text().strip(),
             "title": self.ed_title.text().strip(),
@@ -87,6 +91,13 @@ class BookEditDialog(QDialog):
 
 class MainWindow(QMainWindow):
     """Главное окно «Домашняя библиотека»."""
+
+    # Индексы колонок таблицы. ID хранится в колонке 0, но скрыт от пользователя.
+    COL_ID = 0
+    COL_AUTHOR = 1
+    COL_TITLE = 2
+    COL_YEAR = 3
+    COL_GENRE = 4
 
     def __init__(self) -> None:
         super().__init__()
@@ -145,8 +156,20 @@ class MainWindow(QMainWindow):
 
         # --- Таблица ---
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["ID", "Автор", "Название", "Год", "Жанр"])
+        self.table.setHorizontalHeaderLabels(
+            ["ID", "Автор", "Название", "Год", "Жанр"]
+        )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        
+        # Скрываем колонку ID: она нужна внутри (для update/delete),
+        # но пользователю её показывать не нужно.
+        self.table.setColumnHidden(self.COL_ID, True)
+
+        # Сортировка по клику на заголовок + индикатор (стрелка).
+        self.table.setSortingEnabled(True)
+        self.table.horizontalHeader().setSortIndicatorShown(True)
+
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.doubleClicked.connect(self.on_edit)
@@ -172,15 +195,19 @@ class MainWindow(QMainWindow):
 
     # ---------- helpers ----------
     def _selected_id(self) -> int | None:
-        """Возвращает id выбранной в таблице книги или None."""
+        """Возвращает id выбранной в таблице книги или None.
+
+        ID лежит в скрытой колонке 0 — пользователь её не видит,
+        но значение доступно программно.
+        """
         row = self.table.currentRow()
         if row < 0:
             return None
-        item = self.table.item(row, 0)
+        item = self.table.item(row, self.COL_ID)
         return int(item.text()) if item else None
 
     def refresh(self) -> None:
-        """Обновляет таблицу по текущим фильтрам."""
+        """Обновляет таблицу по текущим фильтрам (сортировка — средствами Qt)."""
         text = self.ed_search.text().strip()
         books = self.repo.search(
             author=text or None,
@@ -190,15 +217,28 @@ class MainWindow(QMainWindow):
             year_to=self.sp_to.value(),
             order_by=self.cmb_order.currentText(),
         )
+
+        # Отключаем сортировку на время заполнения — иначе строки «прыгают».
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
+
         for b in books:
             r = self.table.rowCount()
             self.table.insertRow(r)
-            for c, val in enumerate([b.id, b.author, b.title, b.year, b.genre]):
-                item = QTableWidgetItem(str(val))
-                if c == 0:
-                    item.setTextAlignment(Qt.AlignCenter)
-                self.table.setItem(r, c, item)
+
+            # Колонка 0 (ID) скрыта, но заполняется — нужна для update/delete.
+            item_id = NumericTableItem(str(b.id))
+
+            item_year = NumericTableItem(str(b.year))
+            item_year.setTextAlignment(Qt.AlignCenter)
+
+            self.table.setItem(r, self.COL_ID, item_id)
+            self.table.setItem(r, self.COL_AUTHOR, QTableWidgetItem(b.author))
+            self.table.setItem(r, self.COL_TITLE, QTableWidgetItem(b.title))
+            self.table.setItem(r, self.COL_YEAR, item_year)
+            self.table.setItem(r, self.COL_GENRE, QTableWidgetItem(b.genre))
+
+        self.table.setSortingEnabled(True)
 
     # ---------- handlers ----------
     def on_add(self) -> None:
@@ -227,21 +267,12 @@ class MainWindow(QMainWindow):
         if book is None:
             return
 
-        # Открываем диалог со всеми полями, предзаполненными значениями книги.
         dialog = BookEditDialog(book, self)
         if dialog.exec() != QDialog.Accepted:
             return
 
         values = dialog.get_values()
         try:
-            # Пересоздаём Book для валидации новых полей до записи в БД.
-            Book(
-                author=str(values["author"]),
-                title=str(values["title"]),
-                year=int(values["year"]),  # type: ignore[arg-type]
-                genre=str(values["genre"]),
-            )
-            # Обновляем все поля одним запросом.
             self.repo.update(book_id, **values)
             self.refresh()
         except ValidationError as e:
@@ -257,7 +288,9 @@ class MainWindow(QMainWindow):
         if book_id is None:
             return
         if (
-            QMessageBox.question(self, "Удаление", f"Удалить книгу id={book_id}?")
+            QMessageBox.question(
+                self, "Удаление", "Удалить выбранную книгу?"
+            )
             == QMessageBox.Yes
         ):
             self.repo.delete(book_id)
