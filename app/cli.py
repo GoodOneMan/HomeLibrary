@@ -1,9 +1,6 @@
-"""Минимальный CLI для быстрой проверки без GUI."""
 from __future__ import annotations
-
 import argparse
 from pathlib import Path
-
 from .db import init_db
 from .models import Book
 from .repository import BookRepository
