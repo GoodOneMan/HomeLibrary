@@ -63,22 +63,20 @@ class BookRepository:
         year_to: int | None = None,
         order_by: str = "author",
     ) -> list[Book]:
-        """Поиск с частичным совпадением (LIKE) и фильтром по году."""
-        allowed = {"author", "title", "year", "genre"}
+        """Поиск с частичным совпадением (LIKE) и фильтром по году.
+
+        Текстовые фильтры применяются в Python через ``casefold()``:
+        встроенный ``LIKE`` в SQLite регистронезависим только для ASCII
+        и не подходит для кириллицы. Фильтр по году остаётся в SQL —
+        он работает через индекс ``idx_books_year``.
+        """
+        allowed = {"author", "title", "year", "genre", "id"}
         if order_by not in allowed:
             order_by = "author"
 
+        # SQL-часть: только диапазон лет (индексируемый).
         clauses: list[str] = []
         params: list[Any] = []
-        if author:
-            clauses.append("author LIKE ?")
-            params.append(f"%{author}%")
-        if title:
-            clauses.append("title LIKE ?")
-            params.append(f"%{title}%")
-        if genre:
-            clauses.append("genre LIKE ?")
-            params.append(f"%{genre}%")
         if year_from is not None:
             clauses.append("year >= ?")
             params.append(year_from)
@@ -90,7 +88,20 @@ class BookRepository:
         sql = f"SELECT * FROM books {where} ORDER BY {order_by} COLLATE NOCASE"
         with db_cursor(self.db_path) as cur:
             cur.execute(sql, params)
-            return [Book.from_row(r) for r in cur.fetchall()]
+            books = [Book.from_row(r) for r in cur.fetchall()]
+
+        # Текстовые фильтры — в Python (Unicode-регистронезависимо).
+        if author:
+            a = author.casefold()
+            books = [b for b in books if a in b.author.casefold()]
+        if title:
+            t = title.casefold()
+            books = [b for b in books if t in b.title.casefold()]
+        if genre:
+            g = genre.casefold()
+            books = [b for b in books if g in b.genre.casefold()]
+
+        return books
 
     # ---------- UPDATE ----------
     def update(self, book_id: int, **fields: Any) -> Book:
